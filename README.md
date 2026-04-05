@@ -5,10 +5,8 @@ A standalone Google AI Edge Gallery skill for splitting a bill equally with opti
 ## Files
 
 ```text
-split-bills/
-├── SKILL.md
-└── scripts/
-    └── index.html
+SKILL.md
+index.html
 ```
 
 ## Import into Google AI Edge Gallery
@@ -16,10 +14,10 @@ split-bills/
 1. Open **Agent Skills** in the AI Edge Gallery app.
 2. Choose **Add from URL**.
 3. Paste the raw `SKILL.md` URL from this repo:
-   - `https://raw.githubusercontent.com/jarwoethes-jpg/split-bills-edge/main/split-bills/SKILL.md`
+   - `https://raw.githubusercontent.com/jarwoethes-jpg/split-bills-edge/main/SKILL.md`
 4. Import the skill.
 
-The skill will automatically use `split-bills/scripts/index.html` when the model calls `run_js`.
+The skill will automatically use `index.html` when the model calls `run_js`.
 
 ## Supported input JSON
 

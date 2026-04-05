@@ -23,7 +23,7 @@ Calculate an equal bill split with the same validation and rounding semantics as
    - `roundMode`
    - `currency`
 3. If a required input is missing, ask only for the missing value.
-4. For deterministic calculation, call `run_js` with `scripts/index.html`.
+4. For deterministic calculation, call `run_js` with `index.html`.
 5. Pass the input as JSON using this exact schema:
 
 ```json
