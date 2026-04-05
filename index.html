@@ -2,13 +2,12 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Bill Splitter</title>
 </head>
 <body>
     <script>
-        window['ai_edge_gallery_get_result'] = async (data) => {
+        window.ai_edge_gallery_get_result = async (data) => {
             try {
-                const jsonData = JSON.parse(data);
+                const jsonData = typeof data === 'string' ? JSON.parse(data) : data;
                 
                 const amount = parseFloat(jsonData.amount);
                 const people = parseInt(jsonData.people);
@@ -16,13 +15,17 @@
                 if (isNaN(amount) || amount < 0) throw new Error("Invalid amount");
                 if (isNaN(people) || people <= 0) throw new Error("Invalid number of people");
                 
-                const tax = parseFloat(jsonData.taxPercent || 0) > 0 ? 
-                            amount * (parseFloat(jsonData.taxPercent) / 100) : 
-                            parseFloat(jsonData.taxAmount || 0);
-                            
-                const tip = parseFloat(jsonData.tipPercent || 0) > 0 ? 
-                            (amount + tax) * (parseFloat(jsonData.tipPercent) / 100) : 
-                            parseFloat(jsonData.tipAmount || 0);
+                const taxPercent = parseFloat(jsonData.taxPercent || 0);
+                const taxAmount = parseFloat(jsonData.taxAmount || 0);
+                const tipPercent = parseFloat(jsonData.tipPercent || 0);
+                const tipAmount = parseFloat(jsonData.tipAmount || 0);
+                
+                let tax = taxAmount;
+                if (taxPercent > 0) tax = amount * (taxPercent / 100);
+
+                let tip = tipAmount;
+                const tipBasis = (jsonData.tipBase === "total") ? (amount + tax) : amount;
+                if (tipPercent > 0) tip = tipBasis * (tipPercent / 100);
 
                 const total = amount + tax + tip;
                 const perPerson = total / people;
