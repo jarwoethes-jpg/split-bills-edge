@@ -5,9 +5,14 @@
 </head>
 <body>
     <script>
-        window.ai_edge_gallery_get_result = async (data) => {
+        /**
+         * The required run_js function for AI Edge Gallery.
+         * The Gallery passes an object with 'script_name' and 'data'.
+         */
+        window.run_js = function(params) {
             try {
-                const jsonData = typeof data === 'string' ? JSON.parse(data) : data;
+                // The input 'data' is passed as a JSON string within the params object.
+                const jsonData = JSON.parse(params.data);
                 
                 const amount = parseFloat(jsonData.amount);
                 const people = parseInt(jsonData.people);
