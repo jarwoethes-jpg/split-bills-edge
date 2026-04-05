@@ -1,52 +1,72 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
+  <meta charset="UTF-8">
+  <title>split-bills</title>
 </head>
 <body>
-    <script>
-        /**
-         * The required run_js function for AI Edge Gallery.
-         * The Gallery passes an object with 'script_name' and 'data'.
-         */
-        window.run_js = function(params) {
-            try {
-                // The input 'data' is passed as a JSON string within the params object.
-                const jsonData = JSON.parse(params.data);
-                
-                const amount = parseFloat(jsonData.amount);
-                const people = parseInt(jsonData.people);
-                
-                if (isNaN(amount) || amount < 0) throw new Error("Invalid amount");
-                if (isNaN(people) || people <= 0) throw new Error("Invalid number of people");
-                
-                const taxPercent = parseFloat(jsonData.taxPercent || 0);
-                const taxAmount = parseFloat(jsonData.taxAmount || 0);
-                const tipPercent = parseFloat(jsonData.tipPercent || 0);
-                const tipAmount = parseFloat(jsonData.tipAmount || 0);
-                
-                let tax = taxAmount;
-                if (taxPercent > 0) tax = amount * (taxPercent / 100);
+<script>
+(function () {
+  function compute(jsonData) {
+    const amount = parseFloat(jsonData.amount);
+    const people = parseInt(jsonData.people, 10);
 
-                let tip = tipAmount;
-                const tipBasis = (jsonData.tipBase === "total") ? (amount + tax) : amount;
-                if (tipPercent > 0) tip = tipBasis * (tipPercent / 100);
+    if (Number.isNaN(amount) || amount < 0) throw new Error('Invalid amount');
+    if (Number.isNaN(people) || people <= 0) throw new Error('Invalid number of people');
 
-                const total = amount + tax + tip;
-                const perPerson = total / people;
-                const currency = jsonData.currency || "$";
+    const taxPercent = parseFloat(jsonData.taxPercent || 0);
+    const taxAmount = parseFloat(jsonData.taxAmount || 0);
+    const tipPercent = parseFloat(jsonData.tipPercent || 0);
+    const tipAmount = parseFloat(jsonData.tipAmount || 0);
+    const currency = jsonData.currency || '$';
+    const tipBase = jsonData.tipBase || 'subtotal';
 
-                const result = `Subtotal: ${currency}${amount.toFixed(2)}\n` +
-                               `Tax: ${currency}${tax.toFixed(2)}\n` +
-                               `Tip: ${currency}${tip.toFixed(2)}\n` +
-                               `Total: ${currency}${total.toFixed(2)}\n` +
-                               `Split ${people} ways: ${currency}${perPerson.toFixed(2)} each`;
+    let tax = Number.isNaN(taxAmount) ? 0 : taxAmount;
+    if (!Number.isNaN(taxPercent) && taxPercent > 0) {
+      tax = amount * (taxPercent / 100);
+    }
 
-                return JSON.stringify({ result: result });
-            } catch (e) {
-                return JSON.stringify({ error: e.message });
-            }
-        };
-    </script>
+    let tip = Number.isNaN(tipAmount) ? 0 : tipAmount;
+    const tipBasis = tipBase === 'total' ? (amount + tax) : amount;
+    if (!Number.isNaN(tipPercent) && tipPercent > 0) {
+      tip = tipBasis * (tipPercent / 100);
+    }
+
+    const total = amount + tax + tip;
+    const perPerson = total / people;
+
+    return [
+      `Subtotal: ${currency}${amount.toFixed(2)}`,
+      `Tax: ${currency}${tax.toFixed(2)}`,
+      `Tip: ${currency}${tip.toFixed(2)}`,
+      `Total: ${currency}${total.toFixed(2)}`,
+      `Split ${people} ways: ${currency}${perPerson.toFixed(2)} each`
+    ].join('\n');
+  }
+
+  async function ai_edge_gallery_get_result(data) {
+    try {
+      const jsonData = typeof data === 'string' ? JSON.parse(data) : data;
+      return JSON.stringify({ result: compute(jsonData) });
+    } catch (e) {
+      return JSON.stringify({ error: e.message });
+    }
+  }
+
+  function run_js(params) {
+    try {
+      const payload = params && typeof params === 'object' ? params.data : params;
+      const jsonData = typeof payload === 'string' ? JSON.parse(payload) : payload;
+      return JSON.stringify({ result: compute(jsonData) });
+    } catch (e) {
+      return JSON.stringify({ error: e.message });
+    }
+  }
+
+  window.ai_edge_gallery_get_result = ai_edge_gallery_get_result;
+  window['ai_edge_gallery_get_result'] = ai_edge_gallery_get_result;
+  window.run_js = run_js;
+})();
+</script>
 </body>
 </html>
