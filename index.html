@@ -1,375 +1,44 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>split-bills</title>
+    <meta charset="UTF-8">
+    <title>Bill Splitter</title>
 </head>
 <body>
-  <script>
-    (function () {
-      "use strict";
+    <script>
+        window['ai_edge_gallery_get_result'] = async (data) => {
+            try {
+                const jsonData = JSON.parse(data);
+                
+                const amount = parseFloat(jsonData.amount);
+                const people = parseInt(jsonData.people);
+                
+                if (isNaN(amount) || amount < 0) throw new Error("Invalid amount");
+                if (isNaN(people) || people <= 0) throw new Error("Invalid number of people");
+                
+                const tax = parseFloat(jsonData.taxPercent || 0) > 0 ? 
+                            amount * (parseFloat(jsonData.taxPercent) / 100) : 
+                            parseFloat(jsonData.taxAmount || 0);
+                            
+                const tip = parseFloat(jsonData.tipPercent || 0) > 0 ? 
+                            (amount + tax) * (parseFloat(jsonData.tipPercent) / 100) : 
+                            parseFloat(jsonData.tipAmount || 0);
 
-      var TEN = 10n;
-      var HUNDRED = 100n;
+                const total = amount + tax + tip;
+                const perPerson = total / people;
+                const currency = jsonData.currency || "$";
 
-      function pow10(exp) {
-        var result = 1n;
-        for (var i = 0; i < exp; i += 1) {
-          result *= TEN;
-        }
-        return result;
-      }
+                const result = `Subtotal: ${currency}${amount.toFixed(2)}\n` +
+                               `Tax: ${currency}${tax.toFixed(2)}\n` +
+                               `Tip: ${currency}${tip.toFixed(2)}\n` +
+                               `Total: ${currency}${total.toFixed(2)}\n` +
+                               `Split ${people} ways: ${currency}${perPerson.toFixed(2)} each`;
 
-      function gcd(a, b) {
-        var x = a < 0n ? -a : a;
-        var y = b < 0n ? -b : b;
-        while (y !== 0n) {
-          var t = x % y;
-          x = y;
-          y = t;
-        }
-        return x;
-      }
-
-      function Decimal(num, den) {
-        if (den === 0n) {
-          throw new Error("division by zero");
-        }
-
-        var n = num;
-        var d = den;
-        if (d < 0n) {
-          n = -n;
-          d = -d;
-        }
-
-        var factor = gcd(n, d);
-        this.num = n / factor;
-        this.den = d / factor;
-      }
-
-      Decimal.from = function (value) {
-        if (value instanceof Decimal) {
-          return value;
-        }
-        if (typeof value === "number") {
-          if (!Number.isFinite(value)) {
-            throw new Error("value must be finite");
-          }
-          value = String(value);
-        }
-        if (typeof value === "bigint") {
-          return new Decimal(value, 1n);
-        }
-        if (typeof value !== "string") {
-          throw new Error("value must be a number or numeric string");
-        }
-
-        var text = value.trim();
-        if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(text)) {
-          throw new Error("invalid numeric value: " + value);
-        }
-
-        var sign = 1n;
-        if (text[0] === "+" || text[0] === "-") {
-          if (text[0] === "-") {
-            sign = -1n;
-          }
-          text = text.slice(1);
-        }
-
-        if (text[0] === ".") {
-          text = "0" + text;
-        }
-
-        var parts = text.split(".");
-        var whole = parts[0] || "0";
-        var frac = parts[1] || "";
-        var scale = pow10(frac.length);
-        var digits = BigInt(whole + frac);
-        return new Decimal(sign * digits, scale);
-      };
-
-      Decimal.prototype.add = function (other) {
-        var rhs = Decimal.from(other);
-        return new Decimal(this.num * rhs.den + rhs.num * this.den, this.den * rhs.den);
-      };
-
-      Decimal.prototype.sub = function (other) {
-        var rhs = Decimal.from(other);
-        return new Decimal(this.num * rhs.den - rhs.num * this.den, this.den * rhs.den);
-      };
-
-      Decimal.prototype.mul = function (other) {
-        var rhs = Decimal.from(other);
-        return new Decimal(this.num * rhs.num, this.den * rhs.den);
-      };
-
-      Decimal.prototype.div = function (other) {
-        var rhs = Decimal.from(other);
-        if (rhs.num === 0n) {
-          throw new Error("division by zero");
-        }
-        return new Decimal(this.num * rhs.den, this.den * rhs.num);
-      };
-
-      Decimal.prototype.isNegative = function () {
-        return this.num < 0n;
-      };
-
-      Decimal.prototype.quantize = function (places, mode) {
-        var factor = pow10(places);
-        var scaledNum = this.num * factor;
-        var quotient = scaledNum / this.den;
-        var remainder = scaledNum % this.den;
-
-        if (remainder === 0n) {
-          return new Decimal(quotient, factor);
-        }
-
-        if (mode === "half-up") {
-          var absRem2 = (remainder < 0n ? -remainder : remainder) * 2n;
-          if (absRem2 >= this.den) {
-            quotient += this.num >= 0n ? 1n : -1n;
-          }
-          return new Decimal(quotient, factor);
-        }
-
-        if (mode === "ceiling") {
-          if (this.num > 0n) {
-            quotient += 1n;
-          }
-          return new Decimal(quotient, factor);
-        }
-
-        if (mode === "floor") {
-          if (this.num < 0n) {
-            quotient -= 1n;
-          }
-          return new Decimal(quotient, factor);
-        }
-
-        throw new Error("unsupported rounding mode: " + mode);
-      };
-
-      Decimal.prototype.toFixed = function (places) {
-        var factor = pow10(places);
-        var scaled = this.quantize(places, "half-up");
-        var raw = (scaled.num * factor) / scaled.den;
-        var sign = "";
-        if (raw < 0n) {
-          sign = "-";
-          raw = -raw;
-        }
-        var whole = raw / factor;
-        var frac = String(raw % factor).padStart(places, "0");
-        if (places === 0) {
-          return sign + String(whole);
-        }
-        return sign + String(whole) + "." + frac;
-      };
-
-      function dec(value) {
-        return Decimal.from(value);
-      }
-
-      function money(value) {
-        return dec(value).quantize(2, "half-up");
-      }
-
-      function rounded(value, mode) {
-        var target = dec(value);
-        if (mode === "none") {
-          return target;
-        }
-        if (mode === "nearest-cent") {
-          return target.quantize(2, "half-up");
-        }
-        if (mode === "up-cent") {
-          return target.quantize(2, "ceiling");
-        }
-        if (mode === "down-cent") {
-          return target.quantize(2, "floor");
-        }
-        if (mode === "up-dollar") {
-          return target.quantize(0, "ceiling");
-        }
-        throw new Error("unsupported round mode: " + mode);
-      }
-
-      function normalizeInput(data) {
-        if (typeof data === "string") {
-          try {
-            return JSON.parse(data);
-          } catch (err) {
-            throw new Error("data must be valid JSON");
-          }
-        }
-        if (!data || typeof data !== "object" || Array.isArray(data)) {
-          throw new Error("data must be an object");
-        }
-        return data;
-      }
-
-      function parsePeople(value) {
-        if (typeof value === "number") {
-          if (!Number.isInteger(value)) {
-            throw new Error("people must be an integer");
-          }
-          return value;
-        }
-        if (typeof value === "string" && /^[+-]?\d+$/.test(value.trim())) {
-          return Number(value.trim());
-        }
-        throw new Error("people must be an integer");
-      }
-
-      function getOptionalDecimal(obj, key) {
-        if (obj[key] === undefined || obj[key] === null || obj[key] === "") {
-          return null;
-        }
-        return dec(obj[key]);
-      }
-
-      function validate(input) {
-        if (input.amount === undefined || input.amount === null || input.amount === "") {
-          throw new Error("amount is required");
-        }
-        if (input.people === undefined || input.people === null || input.people === "") {
-          throw new Error("people is required");
-        }
-
-        var amount = dec(input.amount);
-        var people = parsePeople(input.people);
-        var taxPercent = getOptionalDecimal(input, "taxPercent");
-        var taxAmount = getOptionalDecimal(input, "taxAmount");
-        var tipPercent = getOptionalDecimal(input, "tipPercent");
-        var tipAmount = getOptionalDecimal(input, "tipAmount");
-        var tipBase = input.tipBase === undefined || input.tipBase === null || input.tipBase === "" ? "subtotal" : String(input.tipBase);
-        var roundMode = input.roundMode === undefined || input.roundMode === null || input.roundMode === "" ? "none" : String(input.roundMode);
-        var currency = input.currency === undefined || input.currency === null ? "" : String(input.currency);
-
-        if (amount.isNegative()) {
-          throw new Error("amount must be non-negative");
-        }
-        if (people <= 0) {
-          throw new Error("people must be greater than zero");
-        }
-        if (taxPercent !== null && taxAmount !== null) {
-          throw new Error("choose either taxPercent or taxAmount, not both");
-        }
-        if (tipPercent !== null && tipAmount !== null) {
-          throw new Error("choose either tipPercent or tipAmount, not both");
-        }
-
-        var numericValues = [
-          ["taxPercent", taxPercent],
-          ["taxAmount", taxAmount],
-          ["tipPercent", tipPercent],
-          ["tipAmount", tipAmount]
-        ];
-        for (var i = 0; i < numericValues.length; i += 1) {
-          var pair = numericValues[i];
-          if (pair[1] !== null && pair[1].isNegative()) {
-            throw new Error(pair[0] + " must be non-negative");
-          }
-        }
-
-        if (tipBase !== "subtotal" && tipBase !== "total") {
-          throw new Error("tipBase must be one of: subtotal, total");
-        }
-        if (["none", "nearest-cent", "up-cent", "down-cent", "up-dollar"].indexOf(roundMode) === -1) {
-          throw new Error("roundMode must be one of: none, nearest-cent, up-cent, down-cent, up-dollar");
-        }
-
-        return {
-          amount: amount,
-          people: people,
-          taxPercent: taxPercent,
-          taxAmount: taxAmount,
-          tipPercent: tipPercent,
-          tipAmount: tipAmount,
-          tipBase: tipBase,
-          roundMode: roundMode,
-          currency: currency
+                return JSON.stringify({ result: result });
+            } catch (e) {
+                return JSON.stringify({ error: e.message });
+            }
         };
-      }
-
-      function calculate(input) {
-        var subtotal = money(input.amount);
-        var tax;
-        if (input.taxAmount !== null) {
-          tax = money(input.taxAmount);
-        } else if (input.taxPercent !== null) {
-          tax = money(subtotal.mul(input.taxPercent).div(HUNDRED));
-        } else {
-          tax = dec(0);
-        }
-
-        var tipBasis = input.tipBase === "total" ? subtotal.add(tax) : subtotal;
-        var tip;
-        if (input.tipAmount !== null) {
-          tip = money(input.tipAmount);
-        } else if (input.tipPercent !== null) {
-          tip = money(tipBasis.mul(input.tipPercent).div(HUNDRED));
-        } else {
-          tip = dec(0);
-        }
-
-        var total = money(subtotal.add(tax).add(tip));
-        var perPersonExact = total.div(input.people);
-        var perPersonDisplay = money(perPersonExact);
-        var result = {
-          subtotal: subtotal,
-          tax: money(tax),
-          tip: money(tip),
-          total: total,
-          people: input.people,
-          roundMode: input.roundMode,
-          perPersonDisplay: perPersonDisplay
-        };
-
-        if (input.roundMode !== "none") {
-          result.perPersonRounded = rounded(perPersonExact, input.roundMode);
-          result.roundingDifferenceTotal = money(result.perPersonRounded.mul(input.people).sub(total));
-        }
-
-        return result;
-      }
-
-      function fmt(amount, currency) {
-        return currency + dec(amount).toFixed(2);
-      }
-
-      function formatResult(result, currency) {
-        var lines = [
-          "Subtotal: " + fmt(result.subtotal, currency),
-          "Tax: " + fmt(result.tax, currency),
-          "Tip: " + fmt(result.tip, currency),
-          "Total: " + fmt(result.total, currency),
-          "Split " + result.people + " ways: " + fmt(result.perPersonDisplay, currency) + " each"
-        ];
-
-        if (result.roundMode !== "none") {
-          lines.push("Rounded (" + result.roundMode + "): " + fmt(result.perPersonRounded, currency) + " each");
-          lines.push("Rounding difference vs total: " + fmt(result.roundingDifferenceTotal, currency));
-        }
-
-        return lines.join("\n");
-      }
-
-      window.ai_edge_gallery_get_result = function (data) {
-        try {
-          var parsed = normalizeInput(data);
-          var validated = validate(parsed);
-          var result = calculate(validated);
-          return JSON.stringify({ result: formatResult(result, validated.currency) });
-        } catch (err) {
-          return JSON.stringify({ error: err && err.message ? err.message : String(err) });
-        }
-      };
-    }());
-  </script>
+    </script>
 </body>
 </html>
