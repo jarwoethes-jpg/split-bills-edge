@@ -1,52 +1,195 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Bill Splitter Skill</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Split Bills</title>
 </head>
 <body>
-    <script>
-        /**
-         * AI Edge Gallery Bill Splitter Logic
-         * Re-implemented from Python reference for on-device JS execution.
-         */
-        window.ai_edge_gallery_get_result = function(data) {
-            try {
-                if (!data.amount || data.amount < 0) throw new Error("amount must be non-negative");
-                if (!data.people || data.people <= 0) throw new Error("people must be greater than zero");
+<script>
+(() => {
+  const CENT_SCALE = 100n;
+  const PERCENT_SCALE = 100n;
+  const PERCENT_DENOMINATOR = 10000n;
+  const ROUND_MODES = new Set(["none", "nearest-cent", "up-cent", "down-cent", "up-dollar"]);
 
-                const amount = parseFloat(data.amount);
-                const people = parseInt(data.people);
-                const taxPercent = parseFloat(data.taxPercent || 0);
-                const taxAmount = parseFloat(data.taxAmount || 0);
-                const tipPercent = parseFloat(data.tipPercent || 0);
-                const tipAmount = parseFloat(data.tipAmount || 0);
-                const tipBase = data.tipBase || "subtotal"; // subtotal or total
-                const currency = data.currency || "$";
+  function parseScaledDecimal(value, scale, label) {
+    if (value === undefined || value === null || value === "") {
+      throw new Error(`${label} is required`);
+    }
 
-                let tax = taxAmount;
-                if (taxPercent > 0) tax = amount * (taxPercent / 100);
+    let text = String(value).trim();
+    if (!text) {
+      throw new Error(`${label} is required`);
+    }
 
-                let tip = tipAmount;
-                const tipBasis = tipBase === "total" ? (amount + tax) : amount;
-                if (tipPercent > 0) tip = tipBasis * (tipPercent / 100);
+    let sign = 1n;
+    if (text.startsWith("-")) {
+      sign = -1n;
+      text = text.slice(1);
+    } else if (text.startsWith("+")) {
+      text = text.slice(1);
+    }
 
-                const total = amount + tax + tip;
-                const perPerson = total / people;
+    if (!/^\d+(\.\d+)?$/.test(text)) {
+      throw new Error(`${label} must be a valid number`);
+    }
 
-                const res = [
-                    `Subtotal: ${currency}${amount.toFixed(2)}`,
-                    `Tax: ${currency}${tax.toFixed(2)}`,
-                    `Tip: ${currency}${tip.toFixed(2)}`,
-                    `Total: ${currency}${total.toFixed(2)}`,
-                    `Split ${people} ways: ${currency}${perPerson.toFixed(2)} each`
-                ].join("\n");
+    const [wholePart, fracPartRaw = ""] = text.split(".");
+    const scaleDigits = String(scale).length - 1;
+    const padded = fracPartRaw.padEnd(scaleDigits + 1, "0");
+    const fracForScale = padded.slice(0, scaleDigits) || "0".repeat(scaleDigits);
+    const nextDigit = padded[scaleDigits] || "0";
 
-                return JSON.stringify({ result: res });
-            } catch (e) {
-                return JSON.stringify({ error: e.message });
-            }
-        };
-    </script>
+    let scaled = BigInt(wholePart || "0") * scale + BigInt(fracForScale || "0");
+    if (nextDigit >= "5") scaled += 1n;
+    return scaled * sign;
+  }
+
+  function parseMoneyToCents(value, label, required = false) {
+    if (value === undefined || value === null || value === "") {
+      if (required) throw new Error(`${label} is required`);
+      return null;
+    }
+    return parseScaledDecimal(value, CENT_SCALE, label);
+  }
+
+  function parsePercentToBasisPoints(value, label) {
+    if (value === undefined || value === null || value === "") {
+      return null;
+    }
+    return parseScaledDecimal(value, PERCENT_SCALE, label);
+  }
+
+  function divRoundHalfUp(numerator, denominator) {
+    if (denominator <= 0n) throw new Error("internal division error");
+    if (numerator >= 0n) {
+      return (numerator + denominator / 2n) / denominator;
+    }
+    return -((-numerator + denominator / 2n) / denominator);
+  }
+
+  function divRoundCeiling(numerator, denominator) {
+    if (denominator <= 0n) throw new Error("internal division error");
+    if (numerator >= 0n) {
+      return (numerator + denominator - 1n) / denominator;
+    }
+    return -((-numerator) / denominator);
+  }
+
+  function divRoundFloor(numerator, denominator) {
+    if (denominator <= 0n) throw new Error("internal division error");
+    if (numerator >= 0n) {
+      return numerator / denominator;
+    }
+    return -(((-numerator) + denominator - 1n) / denominator);
+  }
+
+  function formatMoney(cents, currency = "") {
+    const negative = cents < 0n;
+    const abs = negative ? -cents : cents;
+    const whole = abs / 100n;
+    const fraction = String(abs % 100n).padStart(2, "0");
+    return `${negative ? "-" : ""}${currency}${whole}.${fraction}`;
+  }
+
+  function roundedPerPerson(totalCents, people, mode) {
+    if (mode === "none") return { exactNumerator: totalCents, exactDenominator: people, roundedCents: null };
+
+    if (mode === "nearest-cent") {
+      return { roundedCents: divRoundHalfUp(totalCents, people) };
+    }
+    if (mode === "up-cent") {
+      return { roundedCents: divRoundCeiling(totalCents, people) };
+    }
+    if (mode === "down-cent") {
+      return { roundedCents: divRoundFloor(totalCents, people) };
+    }
+    if (mode === "up-dollar") {
+      const cents = divRoundCeiling(totalCents, people);
+      const roundedDollar = divRoundCeiling(cents, 100n) * 100n;
+      return { roundedCents: roundedDollar };
+    }
+    throw new Error(`unsupported round mode: ${mode}`);
+  }
+
+  function validateInputs(input) {
+    const amount = parseMoneyToCents(input.amount, "amount", true);
+    const peopleRaw = input.people;
+    const people = Number(peopleRaw);
+    const taxPercent = parsePercentToBasisPoints(input.taxPercent, "taxPercent");
+    const taxAmount = parseMoneyToCents(input.taxAmount, "taxAmount");
+    const tipPercent = parsePercentToBasisPoints(input.tipPercent, "tipPercent");
+    const tipAmount = parseMoneyToCents(input.tipAmount, "tipAmount");
+    const tipBase = input.tipBase ?? "subtotal";
+    const roundMode = input.roundMode ?? "none";
+    const currency = input.currency ?? "";
+
+    if (amount < 0n) throw new Error("amount must be non-negative");
+    if (!Number.isInteger(people) || people <= 0) throw new Error("people must be greater than zero");
+    if (taxPercent !== null && taxAmount !== null) throw new Error("choose either taxPercent or taxAmount, not both");
+    if (tipPercent !== null && tipAmount !== null) throw new Error("choose either tipPercent or tipAmount, not both");
+    if (taxPercent !== null && taxPercent < 0n) throw new Error("taxPercent must be non-negative");
+    if (taxAmount !== null && taxAmount < 0n) throw new Error("taxAmount must be non-negative");
+    if (tipPercent !== null && tipPercent < 0n) throw new Error("tipPercent must be non-negative");
+    if (tipAmount !== null && tipAmount < 0n) throw new Error("tipAmount must be non-negative");
+    if (!["subtotal", "total"].includes(tipBase)) throw new Error("tipBase must be subtotal or total");
+    if (!ROUND_MODES.has(roundMode)) throw new Error("roundMode must be one of: none, nearest-cent, up-cent, down-cent, up-dollar");
+
+    return { amount, people: BigInt(people), peopleNumber: people, taxPercent, taxAmount, tipPercent, tipAmount, tipBase, roundMode, currency };
+  }
+
+  function calculate(input) {
+    const args = validateInputs(input);
+    const subtotal = args.amount;
+
+    let tax = 0n;
+    if (args.taxAmount !== null) {
+      tax = args.taxAmount;
+    } else if (args.taxPercent !== null) {
+      tax = divRoundHalfUp(subtotal * args.taxPercent, PERCENT_DENOMINATOR);
+    }
+
+    const tipBasis = args.tipBase === "total" ? subtotal + tax : subtotal;
+    let tip = 0n;
+    if (args.tipAmount !== null) {
+      tip = args.tipAmount;
+    } else if (args.tipPercent !== null) {
+      tip = divRoundHalfUp(tipBasis * args.tipPercent, PERCENT_DENOMINATOR);
+    }
+
+    const total = subtotal + tax + tip;
+    const perPersonDisplay = divRoundHalfUp(total, args.people);
+
+    const lines = [
+      `Subtotal: ${formatMoney(subtotal, args.currency)}`,
+      `Tax: ${formatMoney(tax, args.currency)}`,
+      `Tip: ${formatMoney(tip, args.currency)}`,
+      `Total: ${formatMoney(total, args.currency)}`,
+      `Split ${args.peopleNumber} ways: ${formatMoney(perPersonDisplay, args.currency)} each`
+    ];
+
+    if (args.roundMode !== "none") {
+      const rounded = roundedPerPerson(total, args.people, args.roundMode).roundedCents;
+      const diff = (rounded * args.people) - total;
+      lines.push(`Rounded (${args.roundMode}): ${formatMoney(rounded, args.currency)} each`);
+      lines.push(`Rounding difference vs total: ${formatMoney(diff, args.currency)}`);
+    }
+
+    return lines.join("\n");
+  }
+
+  window.ai_edge_gallery_get_result = async function(data) {
+    try {
+      const parsed = JSON.parse(data || "{}");
+      const result = calculate(parsed);
+      return JSON.stringify({ result });
+    } catch (error) {
+      console.error(error);
+      return JSON.stringify({ error: error.message || String(error) });
+    }
+  };
+})();
+</script>
 </body>
 </html>
